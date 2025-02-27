@@ -23,6 +23,22 @@
 
 #include <stdlib.h>
 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdbool.h>
+
+/* Include LED driver */
+#include "leds.h"
+
+/* Include Timer driver */
+#include "timer.h"
+
+/* Include i2c driver */
+#include "i2c.h"
+
+/* Include accelerometer driver */
+#include "lsm6dsl.h"
+
 int dataAvailable = 0;
 
 SPI_HandleTypeDef hspi3;
@@ -35,6 +51,62 @@ static void MX_SPI3_Init(void);
   * @brief  The application entry point.
   * @retval int
   */
+
+#define MS_PER_CYCLE 50 //Number of ms for each cycle for the timer
+#define VARIANCE_THRESHOLD 500000 //minimum required change in acceleration for movement detection
+#define LOST_TIME_LIMIT 1200 //# of cycles before systems considers device "lost" (hasnt moved)
+
+int cycles_to_minutes(int cycles) {
+	int total_ms = cycles * MS_PER_CYCLE;
+	int total_s = total_ms / 1000;
+	int minutes = total_s / 60;
+
+	return minutes;
+}
+
+int16_t ax, ay, az; //accelerometer values
+int16_t prev_x = 0, prev_y = 0, prev_z = 0; //prev acc values
+int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
+
+bool isLost = false;
+void TIM2_IRQHandler() {
+	//Interrupt handler that will fire at the end of each period of TIM2.
+	//Note that global variables that are modified in interrupt handlers must be declared as volatile
+	if(TIM2->SR & TIM_SR_UIF){
+		TIM2->SR &= ~TIM_SR_UIF;
+		lsm6dsl_read_xyz(&ax, &ay, &az);
+
+		//Calculates variances
+		int var_x = (ax - prev_x) * (ax - prev_x);
+		int var_y = (ay - prev_y) * (ay - prev_y);
+		int var_z = (az - prev_z) * (az - prev_z);
+
+		// if variances below threshold, assumes no movement and increments lost_counter
+		if (var_x < VARIANCE_THRESHOLD && var_y < VARIANCE_THRESHOLD && var_z < VARIANCE_THRESHOLD) {
+			lost_counter += 1;
+			if (lost_counter >= LOST_TIME_LIMIT) isLost = true;
+		}
+		// if movement detected, reset counter and set isLost flag
+		else {
+			lost_counter = 0;
+			isLost = false;
+		}
+
+		// updates previous acceleration values for next loop iteration
+		prev_x = ax;
+		prev_y = ay;
+		prev_z = az;
+	}
+}
+
+int _write(int file, char *ptr, int len) {
+    int i = 0;
+    for (i = 0; i < len; i++) {
+        ITM_SendChar(*ptr++);
+    }
+    return len;
+}
+
 int main(void)
 {
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
@@ -58,16 +130,29 @@ int main(void)
 
   uint8_t nonDiscoverable = 0;
 
+  i2c_init();
+  lsm6dsl_init();
+
+  timer_init(TIM2);
+  timer_set_ms(TIM2, MS_PER_CYCLE);
+
+  int prev_minutes_since_movement = 0;
+  leds_set(0b11);
+
   while (1)
   {
 	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
 	    catchBLE();
-	  }else{
+	    leds_set(0b10);
+	  }else if(isLost){
+		  leds_set(0b01);
 		  HAL_Delay(1000);
 		  // Send a string to the NORDIC UART service, remember to not include the newline
 		  unsigned char test_str[] = "youlostit BLE test";
 		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, sizeof(test_str)-1, test_str);
 	  }
+
+	  for (volatile int i = 0; i < 100000; i++);
 	  // Wait for interrupt, only uncomment if low power is needed
 	  //__WFI();
   }
