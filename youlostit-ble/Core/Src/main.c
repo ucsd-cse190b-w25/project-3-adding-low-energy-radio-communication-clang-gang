@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#include <string.h>
+
 /* Include LED driver */
 #include "leds.h"
 
@@ -52,23 +54,32 @@ static void MX_SPI3_Init(void);
   * @retval int
   */
 
-#define MS_PER_CYCLE 50 //Number of ms for each cycle for the timer
+#define MS_PER_CYCLE_2 50 //Number of ms for each cycle for TIM2
+#define MS_PER_CYCLE_3 10000 //Number of ms for each cycle for TIM3
 #define VARIANCE_THRESHOLD 500000 //minimum required change in acceleration for movement detection
 #define LOST_TIME_LIMIT 1200 //# of cycles before systems considers device "lost" (hasnt moved)
 
-int cycles_to_minutes(int cycles) {
-	int total_ms = cycles * MS_PER_CYCLE;
+int cycles_to_minutes(int cycles, int ms_per_cycle) {
+	int total_ms = cycles * ms_per_cycle;
 	int total_s = total_ms / 1000;
 	int minutes = total_s / 60;
 
 	return minutes;
 }
 
-int16_t ax, ay, az; //accelerometer values
-int16_t prev_x = 0, prev_y = 0, prev_z = 0; //prev acc values
-int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
+int cycles_to_seconds(int cycles, int ms_per_cycle) {
+	int total_ms = cycles * ms_per_cycle;
+	int total_s = total_ms / 1000;
 
-bool isLost = false;
+	return total_s;
+}
+
+int16_t ax, ay, az; //accelerometer values
+volatile int16_t prev_x = 0, prev_y = 0, prev_z = 0; //prev acc values
+volatile int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
+
+volatile bool isLost = false;
+//Checks if the device has moved recently, setting the isLost flag
 void TIM2_IRQHandler() {
 	//Interrupt handler that will fire at the end of each period of TIM2.
 	//Note that global variables that are modified in interrupt handlers must be declared as volatile
@@ -96,6 +107,18 @@ void TIM2_IRQHandler() {
 		prev_x = ax;
 		prev_y = ay;
 		prev_z = az;
+	}
+}
+
+extern uint8_t deviceName[];
+volatile bool timeForMessage = false;
+//When the device is lost, sets timeForMessage every 10 seconds
+void TIM3_IRQHandler() {
+	if(TIM3->SR & TIM_SR_UIF){
+		TIM3->SR &= ~TIM_SR_UIF;
+		if(isLost) {
+			timeForMessage = true;
+		}
 	}
 }
 
@@ -134,25 +157,41 @@ int main(void)
   lsm6dsl_init();
 
   timer_init(TIM2);
-  timer_set_ms(TIM2, MS_PER_CYCLE);
+  TIM2->PSC = 7999;
+  timer_set_ms(TIM2, MS_PER_CYCLE_2);
 
-  int prev_minutes_since_movement = 0;
-  leds_set(0b11);
+  //Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
+  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM3EN;
+  timer_init(TIM3);
+  NVIC_EnableIRQ(TIM3_IRQn);
+  NVIC_SetPriority(TIM3_IRQn, 2);
+  TIM3->PSC = 7999;
+  timer_set_ms(TIM3, MS_PER_CYCLE_3);
+
+  char deviceNameString[8];
+  strncpy(deviceNameString, (char *) deviceName, sizeof(deviceNameString));
 
   while (1)
   {
-	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
-	    catchBLE();
-	    leds_set(0b10);
-	  }else if(isLost){
-		  leds_set(0b01);
-		  HAL_Delay(1000);
-		  // Send a string to the NORDIC UART service, remember to not include the newline
-		  unsigned char test_str[] = "youlostit BLE test";
-		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, sizeof(test_str)-1, test_str);
+	  if(!isLost) {
+		  disconnectBLE();
+		  setDiscoverability(0);
+	  }
+	  else {
+		  setDiscoverability(1);
 	  }
 
-	  for (volatile int i = 0; i < 100000; i++);
+	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
+	    catchBLE();
+	  }
+	  else if(timeForMessage){
+		  char test_str[20];
+		  sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_2), "s");
+		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
+		  timeForMessage = false;
+	  }
+
+	  //for (volatile int i = 0; i < 100000; i++);
 	  // Wait for interrupt, only uncomment if low power is needed
 	  //__WFI();
   }

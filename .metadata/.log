@@ -1,0 +1,59 @@
+!SESSION 2025-02-26 17:10:28.755 -----------------------------------------------
+eclipse.buildId=Version 1.17.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=x86_64, WS=cocoa, NL=en_US
+Framework arguments:  -keyring /Users/angie/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch x86_64 -keyring /Users/angie/.eclipse_keyring
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2025-02-26 17:10:42.654
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-02-26 17:10:42.656
+!MESSAGE Log4j2 initialized with config file /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-02-26 17:10:46.544
+!MESSAGE Started RMI Server, listening on port 41337
+!SESSION 2025-02-26 17:12:39.596 -----------------------------------------------
+eclipse.buildId=Version 1.17.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=x86_64, WS=cocoa, NL=en_US
+Framework arguments:  -keyring /Users/angie/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch x86_64 -keyring /Users/angie/.eclipse_keyring
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2025-02-26 17:13:00.870
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-02-26 17:13:00.872
+!MESSAGE Log4j2 initialized with config file /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-02-26 17:13:04.302
+!MESSAGE Started RMI Server, listening on port 41337
+
+!ENTRY org.eclipse.core.resources 4 77 2025-02-26 17:14:58.822
+!MESSAGE Invalid project description.
+!SUBENTRY 1 unknown 0 0 2025-02-26 17:14:58.826
+!MESSAGE OK
+!SUBENTRY 1 org.eclipse.core.resources 4 77 2025-02-26 17:14:58.827
+!MESSAGE /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang overlaps the workspace location: /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang
+
+!ENTRY org.eclipse.core.resources 4 77 2025-02-26 17:15:18.005
+!MESSAGE Invalid project description.
+!SUBENTRY 1 unknown 0 0 2025-02-26 17:15:18.006
+!MESSAGE OK
+!SUBENTRY 1 org.eclipse.core.resources 4 77 2025-02-26 17:15:18.006
+!MESSAGE /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang overlaps the workspace location: /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang
+!SESSION 2025-02-26 17:17:11.776 -----------------------------------------------
+eclipse.buildId=Version 1.17.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=x86_64, WS=cocoa, NL=en_US
+Framework arguments:  -keyring /Users/angie/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch x86_64 -keyring /Users/angie/.eclipse_keyring
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-02-26 17:17:23.354
+!MESSAGE Log4j2 initialized with config file /Users/angie/Desktop/College Classes/CSE190/project-3-adding-low-energy-radio-communication-clang-gang/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-02-26 17:17:28.762
+!MESSAGE Started RMI Server, listening on port 41337
