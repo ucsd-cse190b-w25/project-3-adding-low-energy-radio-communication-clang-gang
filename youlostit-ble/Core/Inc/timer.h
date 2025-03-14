@@ -11,9 +11,12 @@
 /* Include the type definitions for the timer peripheral */
 #include <stm32l475xx.h>
 
-void timer_init(TIM_TypeDef* timer);
-void timer_reset(TIM_TypeDef* timer);
-void timer_set_ms(TIM_TypeDef* timer, uint16_t period_ms);
+//void timer_init(TIM_TypeDef* timer);
+//void timer_reset(TIM_TypeDef* timer);
+//void timer_set_ms(TIM_TypeDef* timer, uint16_t period_ms);
+void timer_init(LPTIM_TypeDef *timer);
+void timer_reset(LPTIM_TypeDef *timer);
+void timer_set_ms(LPTIM_TypeDef *timer, uint16_t period_ms);
 
 
 #endif /* TIMER_H_ */

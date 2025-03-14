@@ -5,6 +5,7 @@
  *      Author: angie
  */
 #include <stdint.h>
+#include "stm32l4xx_hal.h"
 
 #ifndef LSM6DSL_H_
 #define LSM6DSL_H_
