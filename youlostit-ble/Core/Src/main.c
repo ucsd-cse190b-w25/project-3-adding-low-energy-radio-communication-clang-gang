@@ -57,7 +57,8 @@ static void MX_SPI3_Init(void);
 #define MS_PER_CYCLE_READ 50 // Number of ms for each cycle to read accelerometer values
 #define MS_PER_CYCLE_MESSAGE 10000 // Number of ms for each cycle to send message
 #define VARIANCE_THRESHOLD 500000 //minimum required change in acceleration for movement detection
-#define LOST_TIME_LIMIT 60 * 1000 / MS_PER_CYCLE_READ //# of cycles before systems considers device "lost" (hasnt moved)
+#define LOST_TIME_LIMIT 60 * 1000 / MS_PER_CYCLE_READ // # of cycles before systems considers device "lost" (hasnt moved)
+#define NUM_CYCLES_FOR_MESSAGE 10000 / MS_PER_CYCLE_READ // # of cycles before a message should be sent
 
 int cycles_to_minutes(int cycles, int ms_per_cycle) {
 	int total_ms = cycles * ms_per_cycle;
@@ -80,26 +81,21 @@ volatile bool readAccel = false;
 volatile int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
 extern uint8_t deviceName[];
 volatile bool timeForMessage = false;
+volatile int message_counter = 0;
 
-//Notifies when it's time to read accelerometer values
+// Notifies when it's time to read accelerometer values or if it's time for a message
 void TIM2_IRQHandler() {
+	SystemClock_Config();
+	HAL_ResumeTick();
 	//Interrupt handler that will fire at the end of each period of TIM2.
 	//Note that global variables that are modified in interrupt handlers must be declared as volatile
 	if(TIM2->SR & TIM_SR_UIF){
 		TIM2->SR &= ~TIM_SR_UIF;
 		readAccel = true;
 		lost_counter += 1; //this gets reset in main if not lost
+		if(isLost) message_counter += 1; // this gets reset in main once a message is sent
 	}
-}
-
-//When the device is lost, sets timeForMessage every 10 seconds
-void TIM3_IRQHandler() {
-	if(TIM3->SR & TIM_SR_UIF){
-		TIM3->SR &= ~TIM_SR_UIF;
-		if(isLost) {
-			timeForMessage = true;
-		}
-	}
+	HAL_PWR_DisableSleepOnExit();
 }
 
 int _write(int file, char *ptr, int len) {
@@ -110,25 +106,18 @@ int _write(int file, char *ptr, int len) {
     return len;
 }
 
-//Notifies when it's time to read accelerometer values
+// Notifies when it's time to read accelerometer values or if it's time for a message
 void LPTIM1_IRQHandler() {
+	SystemClock_Config();
+	HAL_ResumeTick();
     // Check if the interrupt is caused by the auto-reload match flag (ARRM) or another condition.
     if (LPTIM1->ISR & LPTIM_ISR_ARRM) {
+    	LPTIM1->ISR &= ~LPTIM_ISR_ARRM; //clear interrupt flag
         readAccel = true;
         lost_counter += 1; //this gets reset in main if not lost
-        LPTIM1->ISR &= ~LPTIM_ISR_ARRM; //clear interrupt flag
+        if(isLost) message_counter += 1; // this gets reset in main once a message is sent
     }
-}
-
-//When the device is lost, sets timeForMessage every 10 seconds
-void LPTIM2_IRQHandler() {
-    // Check if the interrupt is caused by the auto-reload match flag (ARRM) or another condition.
-    if (LPTIM2->ISR & LPTIM_ISR_ARRM) {
-    	if(isLost) {
-			timeForMessage = true;
-		}
-    	LPTIM2->ISR &= ~LPTIM_ISR_ARRM; //clear interrupt flag
-    }
+    HAL_PWR_DisableSleepOnExit();
 }
 
 // External interrupt handler that gets triggered when there is a change in inactive/active state (sent by lsm6dsl)
@@ -188,67 +177,21 @@ int main(void)
 //	prev_y = ay;
 //	prev_z = az;
 
-	//Stop 2 setup
-	//  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
-	//  PWR->CR1 |= PWR_CR1_LPDS;          // Enable Stop 2 mode
-	//  PWR->CR1 |= PWR_CR1_STOP;          // Enter Stop mode
+	RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN; // Enable the power interface clock
+	//PWR->CR1 |= PWR_CR1_LPMS;          // Enable low power sleep mode
 
-	// Enable all clocks needed
 	//__disable_irq();
 
-//	timer_init_lptim(LPTIM1);
-//	timer_set_ms_lptim(LPTIM1, MS_PER_CYCLE_READ);
+	timer_init_lptim(LPTIM1);
+	timer_set_ms_lptim(LPTIM1, MS_PER_CYCLE_READ);
 
-	timer_init_tim(TIM2);
-	timer_set_ms_tim(TIM2, MS_PER_CYCLE_READ);
-
-	 //Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
-	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM3EN;
-	timer_init_tim(TIM3);
-	NVIC_EnableIRQ(TIM3_IRQn);
-	NVIC_SetPriority(TIM3_IRQn, 2);
-	timer_set_ms_tim(TIM3, MS_PER_CYCLE_MESSAGE);
-
-	//Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
-
+//	timer_init_tim(TIM2);
+//	timer_set_ms_tim(TIM2, MS_PER_CYCLE_READ);
 
 	//__enable_irq();
 
 
 	while (1){
-//		if(readAccel){
-//		  //leds_set(0b11);
-//		  lsm6dsl_read_xyz(&ax, &ay, &az);
-//
-//		  //Calculates variances
-//		  int var_x = (ax - prev_x) * (ax - prev_x);
-//		  int var_y = (ay - prev_y) * (ay - prev_y);
-//		  int var_z = (az - prev_z) * (az - prev_z);
-//
-//		  // if variances below threshold, assumes no movement
-//		  if (var_x < VARIANCE_THRESHOLD && var_y < VARIANCE_THRESHOLD && var_z < VARIANCE_THRESHOLD) {
-//			// Check if enough time has passed for lost mode
-//			if (lost_counter >= LOST_TIME_LIMIT) {
-//				isLost = true;
-//				setDiscoverability(1);
-//			}
-//		  }
-//		  // if movement detected, reset counter and exit lost mode
-//		  else {
-//			  lost_counter = 0;
-//			  isLost = false;
-//			  disconnectBLE();
-//			  setDiscoverability(0);
-//		  }
-//
-//		  // updates previous acceleration values for next loop iteration
-//		  prev_x = ax;
-//		  prev_y = ay;
-//		  prev_z = az;
-//
-//		  readAccel = false;
-//		}
-
 		if(readAccel){
 			leds_set(0b11);
 
@@ -293,14 +236,22 @@ int main(void)
 		}
 
 		// Send message via bluetooth if enough time has passed since previous message (only when device is lost)
-		if(timeForMessage){
-		  char test_str[20];
-		  sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_READ), "s");
-		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
-		  timeForMessage = false;
+//		if(timeForMessage){
+//		  char test_str[20];
+//		  sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_READ), "s");
+//		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
+//		  timeForMessage = false;
+//		}
+		if (message_counter >= NUM_CYCLES_FOR_MESSAGE) {
+			char test_str[20];
+			sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_READ), "s");
+			updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
+			message_counter = 0;
 		}
 
-	  __WFI();
+		HAL_SuspendTick();
+		__WFI();
+//		HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
 	}
 }
 
