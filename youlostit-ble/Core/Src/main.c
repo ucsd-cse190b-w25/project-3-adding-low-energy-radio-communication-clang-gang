@@ -41,6 +41,8 @@
 /* Include accelerometer driver */
 #include "lsm6dsl.h"
 
+int dataAvailable = 0;
+
 SPI_HandleTypeDef hspi3;
 
 void SystemClock_Config(void);
@@ -52,10 +54,10 @@ static void MX_SPI3_Init(void);
   * @retval int
   */
 
-#define MS_PER_CYCLE_2 50 //Number of ms for each cycle for TIM2
-#define MS_PER_CYCLE_3 10000 //Number of ms for each cycle for TIM3
+#define MS_PER_CYCLE_READ 50 // Number of ms for each cycle to read accelerometer values
+#define MS_PER_CYCLE_MESSAGE 10000 // Number of ms for each cycle to send message
 #define VARIANCE_THRESHOLD 500000 //minimum required change in acceleration for movement detection
-#define LOST_TIME_LIMIT 1200 //# of cycles before systems considers device "lost" (hasnt moved)
+#define LOST_TIME_LIMIT 60 * 1000 / MS_PER_CYCLE_READ //# of cycles before systems considers device "lost" (hasnt moved)
 
 int cycles_to_minutes(int cycles, int ms_per_cycle) {
 	int total_ms = cycles * ms_per_cycle;
@@ -72,30 +74,33 @@ int cycles_to_seconds(int cycles, int ms_per_cycle) {
 	return total_s;
 }
 
-int dataAvailable = 0;
+//Needed in interrupt handlers
+volatile bool isLost = false;
+volatile bool readAccel = false;
+volatile int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
+extern uint8_t deviceName[];
+volatile bool timeForMessage = false;
 
 //Notifies when it's time to read accelerometer values
-//void TIM2_IRQHandler() {
-//	//Interrupt handler that will fire at the end of each period of TIM2.
-//	//Note that global variables that are modified in interrupt handlers must be declared as volatile
-//	if(TIM2->SR & TIM_SR_UIF){
-//		TIM2->SR &= ~TIM_SR_UIF;
-//		readAccel = true;
-//		lost_counter += 1; //this gets reset in main if not lost
-//	}
-//}
-//
-//extern uint8_t deviceName[];
-//volatile bool timeForMessage = false;
-////When the device is lost, sets timeForMessage every 10 seconds
-//void TIM3_IRQHandler() {
-//	if(TIM3->SR & TIM_SR_UIF){
-//		TIM3->SR &= ~TIM_SR_UIF;
-//		if(isLost) {
-//			timeForMessage = true;
-//		}
-//	}
-//}
+void TIM2_IRQHandler() {
+	//Interrupt handler that will fire at the end of each period of TIM2.
+	//Note that global variables that are modified in interrupt handlers must be declared as volatile
+	if(TIM2->SR & TIM_SR_UIF){
+		TIM2->SR &= ~TIM_SR_UIF;
+		readAccel = true;
+		lost_counter += 1; //this gets reset in main if not lost
+	}
+}
+
+//When the device is lost, sets timeForMessage every 10 seconds
+void TIM3_IRQHandler() {
+	if(TIM3->SR & TIM_SR_UIF){
+		TIM3->SR &= ~TIM_SR_UIF;
+		if(isLost) {
+			timeForMessage = true;
+		}
+	}
+}
 
 int _write(int file, char *ptr, int len) {
     int i = 0;
@@ -105,12 +110,7 @@ int _write(int file, char *ptr, int len) {
     return len;
 }
 
-int16_t ax, ay, az; //accelerometer values
-int16_t prev_x = 0, prev_y = 0, prev_z = 0; //prev acc values
-
-volatile bool isLost = false;
-volatile bool readAccel = false;
-volatile int lost_counter = 0; // tracks how long motion is below threshold in number of cycles
+//Notifies when it's time to read accelerometer values
 void LPTIM1_IRQHandler() {
     // Check if the interrupt is caused by the auto-reload match flag (ARRM) or another condition.
     if (LPTIM1->ISR & LPTIM_ISR_ARRM) {
@@ -120,16 +120,14 @@ void LPTIM1_IRQHandler() {
     }
 }
 
-extern uint8_t deviceName[];
-volatile bool timeForMessage = false;
-
+//When the device is lost, sets timeForMessage every 10 seconds
 void LPTIM2_IRQHandler() {
     // Check if the interrupt is caused by the auto-reload match flag (ARRM) or another condition.
     if (LPTIM2->ISR & LPTIM_ISR_ARRM) {
-    	LPTIM2->ISR &= ~LPTIM_ISR_ARRM; //clear interrupt flag
     	if(isLost) {
 			timeForMessage = true;
 		}
+    	LPTIM2->ISR &= ~LPTIM_ISR_ARRM; //clear interrupt flag
     }
 }
 
@@ -143,124 +141,167 @@ void LPTIM2_IRQHandler() {
 //	}
 //}
 
+int16_t ax, ay, az; //accelerometer values
+int16_t prev_x, prev_y, prev_z; //prev acc values
+
 int main(void)
 {
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_SPI3_Init();
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_SPI3_Init();
 
-  //RESET BLE MODULE
-  HAL_GPIO_WritePin(BLE_RESET_GPIO_Port,BLE_RESET_Pin,GPIO_PIN_RESET);
-  HAL_Delay(10);
-  HAL_GPIO_WritePin(BLE_RESET_GPIO_Port,BLE_RESET_Pin,GPIO_PIN_SET);
+	//RESET BLE MODULE
+	HAL_GPIO_WritePin(BLE_RESET_GPIO_Port,BLE_RESET_Pin,GPIO_PIN_RESET);
+	HAL_Delay(10);
+	HAL_GPIO_WritePin(BLE_RESET_GPIO_Port,BLE_RESET_Pin,GPIO_PIN_SET);
 
-  ble_init();
+	ble_init();
 
-  HAL_Delay(10);
+	HAL_Delay(10);
 
-  uint8_t nonDiscoverable = 0;
+	uint8_t nonDiscoverable = 0;
 
-  i2c_init();
-  lsm6dsl_init();
+	// Initially make device nondiscoverable
+//	disconnectBLE();
+//	setDiscoverability(0);
+//	catchBLE();
 
-  //timer_init(TIM2);
-  //timer_set_ms(TIM2, MS_PER_CYCLE_2);
+	i2c_init();
+	lsm6dsl_init();
 
-  timer_init(LPTIM1);
-  timer_set_ms(LPTIM1, MS_PER_CYCLE_2);
+	//leds_init();
+	//leds_set(0b00);
+
+	//Device name will be stored here
+	char deviceNameString[8];
+	strncpy(deviceNameString, (char *) deviceName, sizeof(deviceNameString));
+
+	// Set initial values for acceleration
+//	lsm6dsl_read_xyz(&ax, &ay, &az);
+//	prev_x = ax;
+//	prev_y = ay;
+//	prev_z = az;
+
+	//Stop 2 setup
+	//  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+	//  PWR->CR1 |= PWR_CR1_LPDS;          // Enable Stop 2 mode
+	//  PWR->CR1 |= PWR_CR1_STOP;          // Enter Stop mode
+
+	// Enable all clocks needed
+	//__disable_irq();
+
+//	timer_init_lptim(LPTIM1);
+//	timer_set_ms_lptim(LPTIM1, MS_PER_CYCLE_READ);
+
+	timer_init_tim(TIM2);
+	timer_set_ms_tim(TIM2, MS_PER_CYCLE_READ);
+
+	 //Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
+	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM3EN;
+	timer_init_tim(TIM3);
+	NVIC_EnableIRQ(TIM3_IRQn);
+	NVIC_SetPriority(TIM3_IRQn, 2);
+	timer_set_ms_tim(TIM3, MS_PER_CYCLE_MESSAGE);
+
+	//Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
 
 
-  // DEBUG: Leds
-  leds_init();
-  leds_set(0b00);
+	//__enable_irq();
 
-  //Stop 2 setup
-//  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
-//  PWR->CR1 |= PWR_CR1_LPDS;          // Enable Stop 2 mode
-//  PWR->CR1 |= PWR_CR1_STOP;          // Enter Stop mode
 
-  //Setup for TIM3 peripheral, lower priority than TIM2 since it depends on isLost
-//  RCC->APB1ENR2 |= RCC_APB1ENR2_LPTIM2EN;
-//  timer_init(LPTIM2);
-//  NVIC_SetPriority(LPTIM2_IRQn, 2);
-//  NVIC_EnableIRQ(LPTIM2_IRQn);
-//  timer_set_ms(LPTIM2, MS_PER_CYCLE_3);
-//  LPTIM2->CR |= LPTIM_CR_CNTSTRT;
+	while (1){
+//		if(readAccel){
+//		  //leds_set(0b11);
+//		  lsm6dsl_read_xyz(&ax, &ay, &az);
+//
+//		  //Calculates variances
+//		  int var_x = (ax - prev_x) * (ax - prev_x);
+//		  int var_y = (ay - prev_y) * (ay - prev_y);
+//		  int var_z = (az - prev_z) * (az - prev_z);
+//
+//		  // if variances below threshold, assumes no movement
+//		  if (var_x < VARIANCE_THRESHOLD && var_y < VARIANCE_THRESHOLD && var_z < VARIANCE_THRESHOLD) {
+//			// Check if enough time has passed for lost mode
+//			if (lost_counter >= LOST_TIME_LIMIT) {
+//				isLost = true;
+//				setDiscoverability(1);
+//			}
+//		  }
+//		  // if movement detected, reset counter and exit lost mode
+//		  else {
+//			  lost_counter = 0;
+//			  isLost = false;
+//			  disconnectBLE();
+//			  setDiscoverability(0);
+//		  }
+//
+//		  // updates previous acceleration values for next loop iteration
+//		  prev_x = ax;
+//		  prev_y = ay;
+//		  prev_z = az;
+//
+//		  readAccel = false;
+//		}
 
-  //Device name will be stored here
-  char deviceNameString[8];
-  strncpy(deviceNameString, (char *) deviceName, sizeof(deviceNameString));
+		if(readAccel){
+			leds_set(0b11);
 
-  while (1)
-    {
-	  __disable_irq();
-  	  if(readAccel){
-  		  leds_set(0b11);
+			lsm6dsl_read_xyz(&ax, &ay, &az);
 
-  		  lsm6dsl_read_xyz(&ax, &ay, &az);
+			//Calculates variances
+			int var_x = (ax - prev_x) * (ax - prev_x);
+			int var_y = (ay - prev_y) * (ay - prev_y);
+			int var_z = (az - prev_z) * (az - prev_z);
 
-  		  //Calculates variances
-  		  int var_x = (ax - prev_x) * (ax - prev_x);
-  		  int var_y = (ay - prev_y) * (ay - prev_y);
-  		  int var_z = (az - prev_z) * (az - prev_z);
+			// if variances below threshold, assumes no movement and increments lost_counter
+			if (var_x < VARIANCE_THRESHOLD && var_y < VARIANCE_THRESHOLD && var_z < VARIANCE_THRESHOLD) {
+				//Enter lost mode if enough time has passed
+				if (lost_counter >= LOST_TIME_LIMIT) {
+					isLost = true;
+				}
+			}
+			// if movement detected, reset counter and exit lost mode
+			else {
+				lost_counter = 0;
+				isLost = false;
+			}
 
-  		  // if variances below threshold, assumes no movement and increments lost_counter
-  		  if (var_x < VARIANCE_THRESHOLD && var_y < VARIANCE_THRESHOLD && var_z < VARIANCE_THRESHOLD) {
-  			//Enter lost mode if enough time has passed
-  			if (lost_counter >= LOST_TIME_LIMIT) {
-  				isLost = true;
-  			}
-  		  }
-  		  // if movement detected, reset counter and exit lost mode
-  		  else {
-  			lost_counter = 0;
-  			isLost = false;
-  			//leds_set(0b11);
-  		  }
+			// updates previous acceleration values for next loop iteration
+			prev_x = ax;
+			prev_y = ay;
+			prev_z = az;
 
-  		  // updates previous acceleration values for next loop iteration
-  		  prev_x = ax;
-  		  prev_y = ay;
-  		  prev_z = az;
+			readAccel = false;
+		}
 
-  		  readAccel = false;
-  	  }
-  	  //leds_set(0b10);
+		if(!isLost) {
+			disconnectBLE();
+			setDiscoverability(0);
+		}
+		else {
+			setDiscoverability(1);
+		}
 
-  	  if(!isLost) {
-  		  leds_set(0b11);
-  		  disconnectBLE();
-  		  leds_set(0b10);
-  		  setDiscoverability(0);
-  		  leds_set(0b01);
-  	  }
-  	  else {
-  		  leds_set(0b01);
-  		  setDiscoverability(1);
-  	  }
+		if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
+			catchBLE();
+		}
 
-  	  leds_set(0b01);
+		// Send message via bluetooth if enough time has passed since previous message (only when device is lost)
+		if(timeForMessage){
+		  char test_str[20];
+		  sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_READ), "s");
+		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
+		  timeForMessage = false;
+		}
 
-  	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
-  	    catchBLE();
-  	  }
-  	  else if(timeForMessage){
-  		  char test_str[20];
-  		  sprintf(test_str, "%s%s%d%s", deviceNameString, " lost:", cycles_to_seconds(lost_counter, MS_PER_CYCLE_2), "s");
-  		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(test_str), (unsigned char*)test_str);
-  		  timeForMessage = false;
-  	  }
-
-  	  __enable_irq();
-  	  leds_set(0b11);
 	  __WFI();
-    }
+	}
 }
 
 /**
