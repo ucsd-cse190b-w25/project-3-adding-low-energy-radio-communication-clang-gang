@@ -25,7 +25,7 @@ void timer_init_tim(TIM_TypeDef* timer)
 
   // You will need to use the NVIC functions NVIC_EnableIRQ, NVIC_SetPriority with the parameter TIM2_IRQn
   NVIC_EnableIRQ(TIM2_IRQn);
-  NVIC_SetPriority(TIM2_IRQn, 1); // what priority number ?
+  NVIC_SetPriority(TIM2_IRQn, 1);
 
   // Setup the clock tree to pass into the timer and divide it down as needed (hint: look at the ENR registers in the RCC peripheral). Note: The default clock speed of your microcontroller after reboot is 4 MHz. You may want to slow this down by setting the dividers in the clock tree so the timer has a slower clock to operate with (Chapter 6).
   timer->PSC = 7999;
@@ -56,11 +56,9 @@ void timer_init_lptim(LPTIM_TypeDef *timer) {
 
     RCC->CCIPR &= ~RCC_CCIPR_LPTIM1SEL;			// Clear source bits
     RCC->CCIPR |= RCC_CCIPR_LPTIM1SEL_0;		// Use LSI as clock source
-    RCC->CCIPR &= ~RCC_CCIPR_LPTIM2SEL;
-    RCC->CCIPR |= RCC_CCIPR_LPTIM2SEL_0;
 
     timer->CR &= ~LPTIM_CR_ENABLE;				// Disable the timer
-    while(LPTIM1->CR & LPTIM_CR_ENABLE);		// Wait for timer to be enabled
+    while(LPTIM1->CR & LPTIM_CR_ENABLE);		// Wait for timer to be disabled
 
     //clear interrupt flags
     timer->ICR = LPTIM_ICR_CMPMCF | LPTIM_ICR_ARRMCF | LPTIM_ICR_EXTTRIGCF | LPTIM_ICR_CMPOKCF | LPTIM_ICR_ARROKCF | LPTIM_ICR_DOWNCF;
@@ -68,11 +66,11 @@ void timer_init_lptim(LPTIM_TypeDef *timer) {
     timer->CFGR = 0;	// Use default prescaler
     timer->CNT = 0;		// Clear counter
     timer->IER |= LPTIM_IER_ARRMIE;  // Enable ARR match interrupt
-    NVIC_SetPriority(LPTIM1_IRQn, 0);
+    NVIC_SetPriority(LPTIM1_IRQn, 1);
     NVIC_EnableIRQ(LPTIM1_IRQn);
 
     timer->CR |= LPTIM_CR_ENABLE;  // Enable timer
-    while(!(LPTIM1->CR & LPTIM_CR_ENABLE)); // Wait for timer to be disabled
+    while(!(LPTIM1->CR & LPTIM_CR_ENABLE)); // Wait for timer to be enabled
 
     LPTIM1->CR |= LPTIM_CR_CNTSTRT;
 }
@@ -82,9 +80,9 @@ void timer_reset_lptim(LPTIM_TypeDef *timer) {
 }
 
 void timer_set_ms_lptim(LPTIM_TypeDef *timer, uint16_t period_ms) {
-	LPTIM1->CR &= ~LPTIM_CR_ENABLE;
     timer_reset_lptim(timer);
     uint32_t timer_ticks = ((uint32_t) period_ms * 32);
     timer->ARR = timer_ticks - 1;
-    LPTIM1->CR |= LPTIM_CR_ENABLE;
+    while (!(timer->ISR & LPTIM_ISR_ARROK)) {} // Wait for ARR to be set
+    timer->ICR |= LPTIM_ICR_ARROKCF; // Clear ARROK flag
 }

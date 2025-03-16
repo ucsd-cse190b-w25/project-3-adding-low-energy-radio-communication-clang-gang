@@ -4,5 +4,5 @@
 ../Core/Src/timer.c:37:6:timer_reset_tim	1
 ../Core/Src/timer.c:43:6:timer_set_ms_tim	1
 ../Core/Src/timer.c:50:6:timer_init_lptim	4
-../Core/Src/timer.c:80:6:timer_reset_lptim	1
-../Core/Src/timer.c:84:6:timer_set_ms_lptim	1
+../Core/Src/timer.c:78:6:timer_reset_lptim	1
+../Core/Src/timer.c:82:6:timer_set_ms_lptim	2
